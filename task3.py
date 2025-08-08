@@ -1,13 +1,9 @@
-# Asymmetric Cantor set — generation and plot
-# This code generates an asymmetric Cantor-like set by keeping left and right pieces
-# of relative lengths `a` and `b` (0 < a, b < 1, a + b < 1) at each iteration.
-# It plots the intervals at each iteration (stacked vertically) so you can see the construction.
-
+import torch
 import matplotlib.pyplot as plt
 
-def asymmetric_cantor(a, b, iterations):
+def asymmetric_cantor_pytorch(a, b, iterations):
     """
-    Generate levels of an asymmetric Cantor set.
+    Generate levels of an asymmetric Cantor set using PyTorch for parallelization.
     
     Parameters
     ----------
@@ -22,8 +18,8 @@ def asymmetric_cantor(a, b, iterations):
     
     Returns
     -------
-    levels : list of lists of (left, right) tuples
-        levels[0] is the list with the initial interval [(0,1)],
+    levels : list of PyTorch tensors
+        levels[0] is the tensor with the initial interval [[0, 1]],
         levels[1] the intervals after the first removal, etc.
     """
     # Normalize input to call-by-iteration lists
@@ -35,35 +31,55 @@ def asymmetric_cantor(a, b, iterations):
     a_list = expand_param(a)
     b_list = expand_param(b)
     
-    levels = [[(0.0, 1.0)]]
+    # Use torch tensors for parallel computation
+    levels = [torch.tensor([[0.0, 1.0]], dtype=torch.float32)]
+    
     for i in range(iterations):
-        cur = levels[-1]
-        next_level = []
+        cur_intervals = levels[-1]
+        
+        # Get parameters for current iteration
         ai = a_list[i] if i < len(a_list) else a_list[-1]
         bi = b_list[i] if i < len(b_list) else b_list[-1]
+        
+        # Check for invalid parameters
         if not (0 <= ai <= 1 and 0 <= bi <= 1 and ai + bi < 1):
             raise ValueError(f"Invalid a,b at iteration {i}: a={ai}, b={bi}. Require 0<=a,b<=1 and a+b<1.")
-        for (L, R) in cur:
-            length = R - L
-            left_interval = (L, L + ai * length)
-            right_interval = (R - bi * length, R)
-            # Only keep intervals with positive length
-            if left_interval[1] > left_interval[0]:
-                next_level.append(left_interval)
-            if right_interval[1] > right_interval[0]:
-                next_level.append(right_interval)
+            
+        # Calculate lengths of current intervals in parallel
+        lengths = cur_intervals[:, 1] - cur_intervals[:, 0]
+        
+        # Generate new left intervals
+        left_intervals = torch.stack([
+            cur_intervals[:, 0],
+            cur_intervals[:, 0] + ai * lengths
+        ], dim=1)
+        
+        # Generate new right intervals
+        right_intervals = torch.stack([
+            cur_intervals[:, 1] - bi * lengths,
+            cur_intervals[:, 1]
+        ], dim=1)
+        
+        # Concatenate the new intervals for the next level
+        next_level = torch.cat([left_intervals, right_intervals], dim=0)
+        
+        # Filter out intervals with non-positive length
+        positive_length_mask = next_level[:, 1] > next_level[:, 0]
+        next_level = next_level[positive_length_mask]
+        
         levels.append(next_level)
     return levels
 
-def plot_levels(levels, figsize=(8, 6), linewidth=6):
+def plot_levels_pytorch(levels, figsize=(8, 6), linewidth=6):
     """
-    Plot the list of interval levels. levels[0] is bottom (y=0).
+    Plot the list of interval levels from PyTorch tensors. levels[0] is bottom (y=0).
     """
     plt.figure(figsize=figsize)
     n = len(levels)
     for i, level in enumerate(levels):
         y = n - 1 - i  # plot top-down so first iteration is at top
-        for (L, R) in level:
+        for interval in level:
+            L, R = interval.tolist()
             plt.hlines(y, L, R, linewidth=linewidth)
     plt.ylim(-1, n)
     plt.xlim(-0.05, 1.05)
@@ -77,16 +93,11 @@ def plot_levels(levels, figsize=(8, 6), linewidth=6):
 a = 0.25   # keep 25% on the left
 b = 0.10   # keep 10% on the right
 iterations = 6
-levels = asymmetric_cantor(a, b, iterations)
-plot_levels(levels)
+levels_pt = asymmetric_cantor_pytorch(a, b, iterations)
+plot_levels_pytorch(levels_pt)
 
-# Example 2: varying asymmetry across iterations (optional)
-# a_seq = [0.3, 0.2, 0.25, 0.18, 0.22, 0.2]
-# b_seq = [0.1, 0.12, 0.08, 0.15, 0.1, 0.12]
-# levels_var = asymmetric_cantor(a_seq, b_seq, iterations=len(a_seq))
-# plot_levels(levels_var)
-
-# If you want the final set of interval endpoints as a flat list:
-final_intervals = levels[-1]
+# Print final level details
+final_intervals = levels_pt[-1]
 print(f"Number of intervals at final level: {len(final_intervals)}")
-final_intervals[:10]  # show up to first 10 intervals (displayed by the notebook output)
+print("First 10 intervals at the final level:")
+print(final_intervals[:10])
